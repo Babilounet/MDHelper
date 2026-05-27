@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------
--- MDHelper v1.1
--- Sélectionne un membre du raid et caste Détournement via un bouton
--- bindable (Touches & raccourcis) ou via la macro auto-créée "MDHelper".
+-- MDHelper v1.2
+-- Sélectionne un membre du raid/groupe et caste Détournement via un
+-- bouton bindable ou la macro auto-créée "MDHelper".
 ----------------------------------------------------------------------
 
 local ADDON_NAME = "MDHelper"
@@ -75,20 +75,42 @@ end
 -- Secure cast button
 ----------------------------------------------------------------------
 
+local function findUnitForName(name)
+    if not name then return nil end
+    if UnitName("player") == name then return "player" end
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            if UnitName("raid" .. i) == name then return "raid" .. i end
+        end
+    elseif IsInGroup() then
+        for i = 1, 4 do
+            if UnitName("party" .. i) == name then return "party" .. i end
+        end
+    end
+    return nil
+end
+
+local function buildMacroText()
+    local spell = getSpellName()
+    local target = MDHelperDB.selected
+    if not target then
+        return "/cast [help,nodead][@target] " .. spell
+    end
+    local unit = findUnitForName(target)
+    -- Unit ID en priorité (fiable cross-realm), fallback par nom
+    if unit then
+        return "/cast [@" .. unit .. ",help,nodead][@" .. unit .. "][@" .. target .. "] " .. spell
+    end
+    return "/cast [@" .. target .. ",help,nodead][@" .. target .. "] " .. spell
+end
+
 local function updateMacroText()
     if not castButton then return end
     if InCombatLockdown() then
         pendingMacroUpdate = true
         return
     end
-    local target = MDHelperDB.selected
-    local macroText
-    if target then
-        macroText = "/cast [@" .. target .. ",help,nodead][@" .. target .. "] " .. getSpellName()
-    else
-        macroText = "/cast [help,nodead][@target] " .. getSpellName()
-    end
-    castButton:SetAttribute("macrotext", macroText)
+    castButton:SetAttribute("macrotext", buildMacroText())
 end
 
 local function createCastButton()
@@ -161,7 +183,7 @@ local function updateFloatingButton()
     end
     if MDHelperDB.hideFloat then
         floatBtn:Hide()
-    elseif IsInRaid() then
+    elseif IsInGroup() then
         floatBtn:Show()
     else
         floatBtn:Hide()
@@ -401,7 +423,15 @@ SlashCmdList["MDHELPER"] = function(msg)
     elseif msg == "float" then
         MDHelperDB.hideFloat = not MDHelperDB.hideFloat
         updateFloatingButton()
-        print("|cff00ff00MDHelper:|r bouton flottant " .. (MDHelperDB.hideFloat and "masqué" or "affiché en raid") .. ".")
+        print("|cff00ff00MDHelper:|r bouton flottant " .. (MDHelperDB.hideFloat and "masqué" or "affiché en groupe/raid") .. ".")
+    elseif msg == "debug" then
+        print("|cff00ff00MDHelper debug:|r")
+        print("  Sort : " .. getSpellName())
+        print("  Cible sélectionnée : " .. tostring(MDHelperDB.selected))
+        print("  Unit ID résolu : " .. tostring(findUnitForName(MDHelperDB.selected)))
+        print("  InRaid : " .. tostring(IsInRaid()) .. " | InGroup : " .. tostring(IsInGroup()))
+        print("  Macro : " .. (castButton and castButton:GetAttribute("macrotext") or "(absent)"))
+        print("  Macro système existante : " .. tostring(GetMacroIndexByName(MACRO_NAME)))
     elseif msg == "show" then
         if frame then frame:Show() end
     elseif msg == "hide" then
@@ -412,6 +442,7 @@ SlashCmdList["MDHELPER"] = function(msg)
         print("  /md clear    : effacer la cible")
         print("  /md macro    : (re)créer la macro")
         print("  /md float    : afficher/masquer le bouton flottant")
+        print("  /md debug    : diagnostic")
     else
         if frame:IsShown() then frame:Hide() else frame:Show() end
     end
@@ -436,6 +467,7 @@ f:SetScript("OnEvent", function(self, event, arg1)
         print("|cff00ff00MDHelper|r chargé. Tape |cffffcc00/md|r pour ouvrir.")
 
     elseif event == "GROUP_ROSTER_UPDATE" then
+        updateMacroText()
         updateFloatingButton()
         if frame and frame:IsShown() then refreshList() end
 

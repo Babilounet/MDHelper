@@ -1,6 +1,6 @@
 ## Interface: 20505
 ## Title: MDHelper
-## Version: 1.4.0
+## Version: 1.5.0
 ## Notes: Misdirection on a selected raid member, in one click.
 ## SavedVariablesPerCharacter: MDHelperDB
 ## Author: Babilounet

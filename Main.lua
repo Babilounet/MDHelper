@@ -49,43 +49,91 @@ local function classColorStr(class)
     return string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255)
 end
 
+local function isFavorite(name)
+    return name and MDHelperDB.favorites and MDHelperDB.favorites[name] == true
+end
+
+local function isTankRole(role, combatRole)
+    return role == "MAINTANK" or combatRole == "TANK"
+end
+
 local function getRoster()
     local list = {}
     if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
-            local name, _, _, _, _, class, _, online = GetRaidRosterInfo(i)
+            local name, _, _, _, _, class, _, online, _, role, _, combatRole = GetRaidRosterInfo(i)
             if name then
+                local tank = isTankRole(role, combatRole)
                 list[#list + 1] = {
-                    name = name,
-                    class = class,
-                    online = online,
-                    unit = "raid" .. i,
+                    name = name, class = class, online = online, unit = "raid" .. i,
+                    isTank = tank, isFav = isFavorite(name),
+                    pinned = tank or isFavorite(name),
+                    order = i,
                 }
             end
         end
     elseif IsInGroup() then
         local me = UnitName("player")
         local _, meClass = UnitClass("player")
-        list[#list + 1] = {name = me, class = meClass, online = true, unit = "player"}
+        local meRole = UnitGroupRolesAssigned and UnitGroupRolesAssigned("player") or "NONE"
+        local meTank = isTankRole(nil, meRole)
+        list[#list + 1] = {
+            name = me, class = meClass, online = true, unit = "player",
+            isTank = meTank, isFav = isFavorite(me),
+            pinned = meTank or isFavorite(me), order = 0,
+        }
         for i = 1, 4 do
             local unit = "party" .. i
             local name = UnitName(unit)
             if name and name ~= UNKNOWN then
                 local _, class = UnitClass(unit)
+                local cRole = UnitGroupRolesAssigned and UnitGroupRolesAssigned(unit) or "NONE"
+                local tank = isTankRole(nil, cRole)
                 list[#list + 1] = {
-                    name = name,
-                    class = class,
-                    online = UnitIsConnected(unit),
-                    unit = unit,
+                    name = name, class = class,
+                    online = UnitIsConnected(unit), unit = unit,
+                    isTank = tank, isFav = isFavorite(name),
+                    pinned = tank or isFavorite(name), order = i,
                 }
             end
         end
     else
         local me = UnitName("player")
         local _, meClass = UnitClass("player")
-        list[#list + 1] = {name = me, class = meClass, online = true, unit = "player"}
+        list[#list + 1] = {
+            name = me, class = meClass, online = true, unit = "player",
+            isTank = false, isFav = false, pinned = false, order = 0,
+        }
     end
+
+    -- Favoris/tanks en haut, le reste dans l'ordre du raid/groupe
+    table.sort(list, function(a, b)
+        if a.pinned ~= b.pinned then return a.pinned end
+        return (a.order or 999) < (b.order or 999)
+    end)
     return list
+end
+
+local function getClassForName(name)
+    if not name then return nil end
+    if UnitName("player") == name then
+        local _, c = UnitClass("player")
+        return c
+    end
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            local n, _, _, _, _, class = GetRaidRosterInfo(i)
+            if n == name then return class end
+        end
+    elseif IsInGroup() then
+        for i = 1, 4 do
+            if UnitName("party" .. i) == name then
+                local _, c = UnitClass("party" .. i)
+                return c
+            end
+        end
+    end
+    return nil
 end
 
 ----------------------------------------------------------------------
@@ -121,13 +169,24 @@ local function buildMacroText()
     return "/cast [@" .. target .. ",help,nodead][@" .. target .. "] " .. spell
 end
 
+local function syncActionBarMacro(body)
+    if InCombatLockdown() then return end
+    local idx = GetMacroIndexByName(MACRO_NAME)
+    if idx and idx > 0 then
+        EditMacro(idx, MACRO_NAME, MACRO_ICON, body)
+    end
+end
+
 local function updateMacroText()
     if not castButton then return end
     if InCombatLockdown() then
         pendingMacroUpdate = true
         return
     end
-    castButton:SetAttribute("macrotext", buildMacroText())
+    local body = buildMacroText()
+    castButton:SetAttribute("macrotext", body)
+    -- La macro sur la barre d'action exécute le /cast directement, plus besoin de /click
+    syncActionBarMacro(body)
 end
 
 local function createCastButton()
@@ -153,7 +212,7 @@ local function createOrUpdateMacro(silent)
         end
         return false
     end
-    local body = "/click MDHelperCastButton"
+    local body = buildMacroText()
     local idx = GetMacroIndexByName(MACRO_NAME)
     if idx and idx > 0 then
         EditMacro(idx, MACRO_NAME, MACRO_ICON, body)
@@ -198,7 +257,8 @@ local function updateFloatingButton()
     if not floatBtn then return end
     local sel = MDHelperDB.selected
     if sel then
-        floatBtn.text:SetText("|cffffcc00" .. sel .. "|r")
+        local color = classColorStr(getClassForName(sel))
+        floatBtn.text:SetText(color .. sel .. "|r")
     else
         floatBtn.text:SetText("|cff888888(aucune)|r")
     end
@@ -225,14 +285,21 @@ local function refreshList()
         if not btn then
             btn = CreateFrame("Button", nil, scrollChild)
             btn:SetSize(180, 20)
+            btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             btn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
 
             btn.bg = btn:CreateTexture(nil, "BACKGROUND")
             btn.bg:SetAllPoints()
             btn.bg:SetColorTexture(0, 0, 0, 0)
 
+            btn.pin = btn:CreateTexture(nil, "OVERLAY")
+            btn.pin:SetSize(12, 12)
+            btn.pin:SetPoint("LEFT", 4, 0)
+            btn.pin:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
+            btn.pin:Hide()
+
             btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            btn.text:SetPoint("LEFT", 6, 0)
+            btn.text:SetPoint("LEFT", 20, 0)
             btn.text:SetJustifyH("LEFT")
 
             btn.check = btn:CreateTexture(nil, "OVERLAY")
@@ -241,12 +308,22 @@ local function refreshList()
             btn.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
             btn.check:Hide()
 
-            btn:SetScript("OnClick", function(self)
-                MDHelperDB.selected = self.memberName
-                updateMacroText()
-                updateSelectedLabel()
-                updateFloatingButton()
-                refreshList()
+            btn:SetScript("OnClick", function(self, button)
+                if button == "RightButton" then
+                    MDHelperDB.favorites = MDHelperDB.favorites or {}
+                    if MDHelperDB.favorites[self.memberName] then
+                        MDHelperDB.favorites[self.memberName] = nil
+                    else
+                        MDHelperDB.favorites[self.memberName] = true
+                    end
+                    refreshList()
+                else
+                    MDHelperDB.selected = self.memberName
+                    updateMacroText()
+                    updateSelectedLabel()
+                    updateFloatingButton()
+                    refreshList()
+                end
             end)
 
             rowButtons[i] = btn
@@ -257,8 +334,13 @@ local function refreshList()
         btn:SetPoint("TOPLEFT", 0, -(i - 1) * 20)
         btn:Show()
 
+        if member.pinned then btn.pin:Show() else btn.pin:Hide() end
+
         local color = classColorStr(member.class)
         local label = color .. member.name .. "|r"
+        if member.isTank then
+            label = label .. " |cff4488ffT|r"
+        end
         if not member.online then
             label = label .. " |cff888888(hors-ligne)|r"
         end
@@ -343,13 +425,16 @@ local function createUI()
 
     local help = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     help:SetPoint("BOTTOM", 0, 10)
-    help:SetText("Bind via Options > Touches > MDHelper")
+    help:SetText("Clic droit sur un nom : épingler en haut\nBind via Options > Touches > MDHelper")
     help:SetJustifyH("CENTER")
 
     frame:SetScript("OnShow", function()
         updateSelectedLabel()
         refreshList()
     end)
+
+    -- ESC ferme la fenêtre
+    tinsert(UISpecialFrames, "MDHelper_Frame")
 end
 
 local function createFloatingButton()
@@ -369,20 +454,16 @@ local function createFloatingButton()
     floatBtn:SetClampedToScreen(true)
 
     floatBtn.icon = floatBtn:CreateTexture(nil, "ARTWORK")
-    floatBtn.icon:SetSize(18, 18)
+    floatBtn.icon:SetSize(22, 22)
     floatBtn.icon:SetPoint("LEFT", 6, 0)
     floatBtn.icon:SetTexture("Interface\\Icons\\Ability_Hunter_Misdirection")
     floatBtn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    floatBtn.label = floatBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    floatBtn.label:SetPoint("TOPLEFT", floatBtn.icon, "TOPRIGHT", 4, 0)
-    floatBtn.label:SetText("MD")
-    floatBtn.label:SetTextColor(1, 0.82, 0)
-
-    floatBtn.text = floatBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    floatBtn.text:SetPoint("BOTTOMLEFT", floatBtn.icon, "BOTTOMRIGHT", 4, 0)
-    floatBtn.text:SetPoint("RIGHT", -6, 0)
+    floatBtn.text = floatBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    floatBtn.text:SetPoint("LEFT", floatBtn.icon, "RIGHT", 8, 0)
+    floatBtn.text:SetPoint("RIGHT", -8, 0)
     floatBtn.text:SetJustifyH("LEFT")
+    floatBtn.text:SetJustifyV("MIDDLE")
 
     floatBtn:SetScript("OnDragStart", function(self) self:StartMoving() end)
     floatBtn:SetScript("OnDragStop", function(self)

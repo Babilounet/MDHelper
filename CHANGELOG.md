@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5.0
+
+- **Robustness**: the action-bar macro now contains the actual `/cast` line, not `/click MDHelperCastButton`. The macro body is kept in sync with the selected target on every roster/selection change (out of combat). This eliminates the entire `/click`-on-secure-button indirection that was fragile in TBC 2.5.5 and makes the macro tooltip show the spell directly. The secure button is still created so the keybind (Options > Key Bindings > MDHelper) keeps working unchanged
+- **Favorites / pinned**: right-click a name in the list to pin them at the top. Tanks (Main Tank assignment or role = TANK) are auto-pinned. A yellow star icon marks pinned rows. Tanks are flagged with a blue **T** next to their name
+- **Floating button**: removed the "MD" label (the icon already conveys the spell) and gave the selected name the class color, vertically centered. Bigger icon, cleaner layout
+- **ESC closes the window**: the list frame is registered in `UISpecialFrames`
+
 ## v1.4.0
 
 - **Fix**: the secure cast button is no longer `Hide()`-ed. In TBC 2.5.5 the `/click` slash command silently fails on hidden secure buttons, which made the macro and the keybind do nothing. The button is now sized 1×1, alpha 0, mouse disabled — invisible to the user but properly visible to the secure-action handler

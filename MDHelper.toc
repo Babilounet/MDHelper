@@ -1,0 +1,10 @@
+## Interface: 20505
+## Title: MDHelper
+## Version: 1.1.0
+## Notes: Misdirection on a selected raid member, in one click.
+## SavedVariablesPerCharacter: MDHelperDB
+## Author: Babilounet
+## X-Curse-Project-ID: 1556031
+
+Bindings.xml
+Main.lua

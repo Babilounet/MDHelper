@@ -1,0 +1,3 @@
+<Bindings>
+    <Binding name="CLICK MDHelperCastButton:LeftButton" header="MDHELPER" category="MDHelper" description="Détournement sur la cible sélectionnée" />
+</Bindings>

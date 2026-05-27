@@ -1,0 +1,5 @@
+package-as: MDHelper
+
+ignore:
+  - README.md
+  - .github

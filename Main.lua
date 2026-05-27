@@ -1,5 +1,5 @@
 ----------------------------------------------------------------------
--- MDHelper v1.2
+-- MDHelper v1.3
 -- Sélectionne un membre du raid/groupe et caste Détournement via un
 -- bouton bindable ou la macro auto-créée "MDHelper".
 ----------------------------------------------------------------------
@@ -8,6 +8,22 @@ local ADDON_NAME = "MDHelper"
 local MISDIRECTION_ID = 34477
 local MACRO_NAME = "MDHelper"
 local MACRO_ICON = "Ability_Hunter_Misdirection"
+
+-- Fallback localisé si GetSpellInfo échoue
+local SPELL_NAMES = {
+    enUS = "Misdirection",
+    enGB = "Misdirection",
+    frFR = "Détournement",
+    deDE = "Irreführung",
+    esES = "Distracción",
+    esMX = "Distracción",
+    itIT = "Diversione",
+    ptBR = "Engano",
+    ruRU = "Отвлечение внимания",
+    koKR = "위장",
+    zhCN = "误导",
+    zhTW = "誤導",
+}
 
 MDHelperDB = MDHelperDB or {}
 
@@ -23,7 +39,8 @@ local pendingMacroUpdate = false
 
 local function getSpellName()
     local name = GetSpellInfo(MISDIRECTION_ID)
-    return name or "Misdirection"
+    if name and name ~= "" then return name end
+    return SPELL_NAMES[GetLocale()] or "Misdirection"
 end
 
 local function classColorStr(class)
@@ -480,12 +497,18 @@ f:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "PLAYER_ENTERING_WORLD" then
         updateMacroText()
         updateFloatingButton()
-        -- Création auto de la macro la première fois (une seule tentative)
+        -- Création auto de la macro tant qu'elle n'existe pas (GetMacroIndexByName retourne 0 si absente)
         if not MDHelperDB.macroAutoCreated then
-            MDHelperDB.macroAutoCreated = true
             C_Timer.After(2, function()
-                if not GetMacroIndexByName(MACRO_NAME) then
-                    createOrUpdateMacro(false)
+                if InCombatLockdown() then return end
+                local idx = GetMacroIndexByName(MACRO_NAME)
+                if not idx or idx == 0 then
+                    if createOrUpdateMacro(true) then
+                        MDHelperDB.macroAutoCreated = true
+                        print("|cff00ff00MDHelper:|r macro \"" .. MACRO_NAME .. "\" créée. Glisse-la sur ta barre d'action.")
+                    end
+                else
+                    MDHelperDB.macroAutoCreated = true
                 end
             end)
         end

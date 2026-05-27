@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.0
+
+- **Fix**: macro auto-creation never ran because `GetMacroIndexByName` returns `0` (truthy in Lua), not `nil`. The guard now compares against `0` correctly and retries on every login until the macro exists
+- **Fix**: spell name fallback no longer assumes English. If `GetSpellInfo(34477)` returns nil/empty (rare locale loading issue), MDHelper now falls back to the localized name for the current `GetLocale()` (FR, DE, ES, IT, PT, RU, KO, zhCN, zhTW)
+- **UX**: explicit confirmation message when the macro is auto-created at login
+
 ## v1.2.0
 
 - **Party support**: the floating button now appears in any group, not just in raids

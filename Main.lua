@@ -271,91 +271,126 @@ local function updateFloatingButton()
     end
 end
 
-local function refreshList()
-    if not frame or not frame:IsShown() then return end
+local MAX_ROWS = 40
+local refreshList -- forward decl
 
-    local roster = getRoster()
+local function buildRowMacroText(member)
+    local spell = getSpellName()
+    return "/cast [@" .. member.unit .. ",help,nodead][@" .. member.unit .. "][@" .. member.name .. ",help,nodead][@" .. member.name .. "] " .. spell
+end
 
-    for _, btn in ipairs(rowButtons) do
-        btn:Hide()
-    end
+local function createRowButton(i)
+    local btn = CreateFrame("Button", "MDHelperRow" .. i, scrollChild, "SecureActionButtonTemplate")
+    btn:SetSize(180, 20)
+    btn:SetPoint("TOPLEFT", 0, -(i - 1) * 20)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+    btn:Hide()
 
-    for i, member in ipairs(roster) do
-        local btn = rowButtons[i]
-        if not btn then
-            btn = CreateFrame("Button", nil, scrollChild)
-            btn:SetSize(180, 20)
-            btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            btn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+    btn.bg = btn:CreateTexture(nil, "BACKGROUND")
+    btn.bg:SetAllPoints()
+    btn.bg:SetColorTexture(0, 0, 0, 0)
 
-            btn.bg = btn:CreateTexture(nil, "BACKGROUND")
-            btn.bg:SetAllPoints()
-            btn.bg:SetColorTexture(0, 0, 0, 0)
+    btn.pin = btn:CreateTexture(nil, "OVERLAY")
+    btn.pin:SetSize(12, 12)
+    btn.pin:SetPoint("LEFT", 4, 0)
+    btn.pin:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
+    btn.pin:Hide()
 
-            btn.pin = btn:CreateTexture(nil, "OVERLAY")
-            btn.pin:SetSize(12, 12)
-            btn.pin:SetPoint("LEFT", 4, 0)
-            btn.pin:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
-            btn.pin:Hide()
+    btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    btn.text:SetPoint("LEFT", 20, 0)
+    btn.text:SetJustifyH("LEFT")
 
-            btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            btn.text:SetPoint("LEFT", 20, 0)
-            btn.text:SetJustifyH("LEFT")
+    btn.check = btn:CreateTexture(nil, "OVERLAY")
+    btn.check:SetSize(14, 14)
+    btn.check:SetPoint("RIGHT", -4, 0)
+    btn.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    btn.check:Hide()
 
-            btn.check = btn:CreateTexture(nil, "OVERLAY")
-            btn.check:SetSize(14, 14)
-            btn.check:SetPoint("RIGHT", -4, 0)
-            btn.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-            btn.check:Hide()
+    -- Clic gauche = cast secure direct sur ce membre (fonctionne EN COMBAT)
+    btn:SetAttribute("type1", "macro")
 
-            btn:SetScript("OnClick", function(self, button)
-                if button == "RightButton" then
-                    MDHelperDB.favorites = MDHelperDB.favorites or {}
-                    if MDHelperDB.favorites[self.memberName] then
-                        MDHelperDB.favorites[self.memberName] = nil
-                    else
-                        MDHelperDB.favorites[self.memberName] = true
-                    end
-                    refreshList()
-                else
-                    MDHelperDB.selected = self.memberName
-                    updateMacroText()
-                    updateSelectedLabel()
-                    updateFloatingButton()
-                    refreshList()
-                end
-            end)
-
-            rowButtons[i] = btn
-        end
-
-        btn.memberName = member.name
-        btn:ClearAllPoints()
-        btn:SetPoint("TOPLEFT", 0, -(i - 1) * 20)
-        btn:Show()
-
-        if member.pinned then btn.pin:Show() else btn.pin:Hide() end
-
-        local color = classColorStr(member.class)
-        local label = color .. member.name .. "|r"
-        if member.isTank then
-            label = label .. " |cff4488ffT|r"
-        end
-        if not member.online then
-            label = label .. " |cff888888(hors-ligne)|r"
-        end
-        btn.text:SetText(label)
-
-        if member.name == MDHelperDB.selected then
-            btn.check:Show()
-            btn.bg:SetColorTexture(1, 0.8, 0, 0.2)
+    btn:SetScript("OnClick", function(self, button)
+        if button == "RightButton" then
+            MDHelperDB.favorites = MDHelperDB.favorites or {}
+            if MDHelperDB.favorites[self.memberName] then
+                MDHelperDB.favorites[self.memberName] = nil
+            else
+                MDHelperDB.favorites[self.memberName] = true
+            end
+            refreshList()
         else
-            btn.check:Hide()
-            btn.bg:SetColorTexture(0, 0, 0, 0)
+            -- Le cast a été géré par le secure handler (type1=macro)
+            -- On met aussi à jour la sélection (pour le keybind global)
+            MDHelperDB.selected = self.memberName
+            updateMacroText()
+            updateSelectedLabel()
+            updateFloatingButton()
+            refreshList()
+        end
+    end)
+
+    return btn
+end
+
+local function preCreateRows()
+    if InCombatLockdown() then return end
+    for i = 1, MAX_ROWS do
+        if not rowButtons[i] then
+            rowButtons[i] = createRowButton(i)
+        end
+    end
+end
+
+refreshList = function()
+    if not frame then return end
+    preCreateRows()
+    local roster = getRoster()
+    local inCombat = InCombatLockdown()
+
+    for i = 1, MAX_ROWS do
+        local btn = rowButtons[i]
+        if btn then
+            local member = roster[i]
+            if member then
+                btn.memberName = member.name
+
+                -- Mise à jour non-sécurisée (toujours OK, même en combat)
+                if member.pinned then btn.pin:Show() else btn.pin:Hide() end
+                local color = classColorStr(member.class)
+                local label = color .. member.name .. "|r"
+                if member.isTank then label = label .. " |cff4488ffT|r" end
+                if not member.online then label = label .. " |cff888888(hors-ligne)|r" end
+                btn.text:SetText(label)
+
+                if member.name == MDHelperDB.selected then
+                    btn.check:Show()
+                    btn.bg:SetColorTexture(1, 0.8, 0, 0.2)
+                else
+                    btn.check:Hide()
+                    btn.bg:SetColorTexture(0, 0, 0, 0)
+                end
+
+                -- Attribut sécurisé + visibilité : hors combat seulement
+                if not inCombat then
+                    btn:SetAttribute("macrotext1", buildRowMacroText(member))
+                    btn:Show()
+                end
+            else
+                btn.memberName = nil
+                btn.text:SetText("")
+                btn.pin:Hide()
+                btn.check:Hide()
+                btn.bg:SetColorTexture(0, 0, 0, 0)
+                if not inCombat then
+                    btn:SetAttribute("macrotext1", "")
+                    btn:Hide()
+                end
+            end
         end
     end
 
-    scrollChild:SetHeight(math.max(1, #roster) * 20)
+    if scrollChild then scrollChild:SetHeight(math.max(1, #roster) * 20) end
 end
 
 local function createUI()
@@ -425,7 +460,7 @@ local function createUI()
 
     local help = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     help:SetPoint("BOTTOM", 0, 10)
-    help:SetText("Clic droit sur un nom : épingler en haut\nBind via Options > Touches > MDHelper")
+    help:SetText("Clic gauche : cast direct (OK en combat)\nClic droit : épingler en haut")
     help:SetJustifyH("CENTER")
 
     frame:SetScript("OnShow", function()
@@ -571,13 +606,14 @@ f:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "GROUP_ROSTER_UPDATE" then
         updateMacroText()
         updateFloatingButton()
-        if frame and frame:IsShown() then refreshList() end
+        refreshList()  -- sync les attributs des rows même si la liste est fermée
 
     elseif event == "PLAYER_REGEN_ENABLED" then
         if pendingMacroUpdate then
             pendingMacroUpdate = false
             updateMacroText()
         end
+        refreshList()  -- rejoue les SetAttribute différés (rows secure)
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         updateMacroText()

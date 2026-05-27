@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.6.0
+
+- **In-combat target switch**: each row in the list is now its own `SecureActionButton`. Left-clicking a name casts Misdirection on that person **directly, even in combat**. Right-click still toggles the favorite. This works around Blizzard's restriction that prevents updating the global cast button's target during combat — instead, every row is pre-configured out of combat as its own dedicated cast button
+- 40 row buttons are pre-created and kept in sync with the roster on `GROUP_ROSTER_UPDATE`. Updates that would need to happen during combat are deferred and replayed on `PLAYER_REGEN_ENABLED`
+- The global keybind / action-bar macro (cast on the "selected" target) keeps working as before. Clicking a row in the list now also updates the selected target so the keybind tracks the latest pick
+- Help text in the list now reflects the new behavior
+
 ## v1.5.0
 
 - **Robustness**: the action-bar macro now contains the actual `/cast` line, not `/click MDHelperCastButton`. The macro body is kept in sync with the selected target on every roster/selection change (out of combat). This eliminates the entire `/click`-on-secure-button indirection that was fragile in TBC 2.5.5 and makes the macro tooltip show the spell directly. The secure button is still created so the keybind (Options > Key Bindings > MDHelper) keeps working unchanged

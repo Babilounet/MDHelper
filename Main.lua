@@ -134,7 +134,11 @@ local function createCastButton()
     castButton = CreateFrame("Button", "MDHelperCastButton", UIParent, "SecureActionButtonTemplate")
     castButton:SetAttribute("type", "macro")
     castButton:RegisterForClicks("AnyUp", "AnyDown")
-    castButton:Hide()
+    -- Visible mais invisible : /click sur un bouton Hide()'d est unreliable en TBC 2.5.5
+    castButton:SetSize(1, 1)
+    castButton:SetPoint("CENTER", UIParent, "CENTER")
+    castButton:SetAlpha(0)
+    castButton:EnableMouse(false)
     updateMacroText()
 end
 

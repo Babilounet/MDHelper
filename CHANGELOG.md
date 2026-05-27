@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.0
+
+- **Fix**: the secure cast button is no longer `Hide()`-ed. In TBC 2.5.5 the `/click` slash command silently fails on hidden secure buttons, which made the macro and the keybind do nothing. The button is now sized 1×1, alpha 0, mouse disabled — invisible to the user but properly visible to the secure-action handler
+
 ## v1.3.0
 
 - **Fix**: macro auto-creation never ran because `GetMacroIndexByName` returns `0` (truthy in Lua), not `nil`. The guard now compares against `0` correctly and retries on every login until the macro exists

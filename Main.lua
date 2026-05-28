@@ -1,7 +1,10 @@
 ----------------------------------------------------------------------
--- MDHelper v1.3
--- Sélectionne un membre du raid/groupe et caste Détournement via un
--- bouton bindable ou la macro auto-créée "MDHelper".
+-- MDHelper v1.8
+-- Sélectionne un membre du raid/groupe et caste Détournement via :
+--   - le bouton flottant (clic gauche)
+--   - les boutons "favoris" (un par tank/épinglé, clic gauche)
+--   - la macro auto-créée "MDHelper" sur la barre d'action
+--   - le keybind dans Options > Touches > MDHelper
 ----------------------------------------------------------------------
 
 local ADDON_NAME = "MDHelper"
@@ -30,8 +33,12 @@ MDHelperDB = MDHelperDB or {}
 local frame, listFrame, scrollChild, selectedLabel
 local floatBtn
 local rowButtons = {}
+local favSlots = {}
 local castButton
 local pendingMacroUpdate = false
+
+local MAX_FAV_SLOTS = 10
+local refreshFavoriteSlots -- forward decl
 
 ----------------------------------------------------------------------
 -- Helpers
@@ -158,16 +165,16 @@ end
 local function buildMacroText()
     local spell = getSpellName()
     local target = MDHelperDB.selected
-    -- @mouseover en 1er : permet de switcher de cible en combat en survolant
-    -- un cadre de raid (Blizzard, Grid, ElvUI, etc.).
+    -- Toutes les clauses ont [help,nodead] : si aucune cible valide
+    -- (vivante, amicale) ne matche, le cast ne part pas (MD a un long CD).
     if not target then
-        return "/cast [@mouseover,help,nodead][help,nodead][@target] " .. spell
+        return "/cast [@mouseover,help,nodead][help,nodead] " .. spell
     end
     local unit = findUnitForName(target)
     if unit then
-        return "/cast [@mouseover,help,nodead][@" .. unit .. ",help,nodead][@" .. unit .. "][@" .. target .. "] " .. spell
+        return "/cast [@mouseover,help,nodead][@" .. unit .. ",help,nodead] " .. spell
     end
-    return "/cast [@mouseover,help,nodead][@" .. target .. ",help,nodead][@" .. target .. "] " .. spell
+    return "/cast [@mouseover,help,nodead][@" .. target .. ",help,nodead] " .. spell
 end
 
 local function syncActionBarMacro(body)
@@ -179,14 +186,14 @@ local function syncActionBarMacro(body)
 end
 
 local function updateMacroText()
-    if not castButton then return end
     if InCombatLockdown() then
         pendingMacroUpdate = true
         return
     end
     local body = buildMacroText()
-    castButton:SetAttribute("macrotext", body)
-    -- La macro sur la barre d'action exécute le /cast directement, plus besoin de /click
+    if castButton then castButton:SetAttribute("macrotext", body) end
+    if floatBtn then floatBtn:SetAttribute("macrotext1", body) end
+    -- Action-bar macro executes /cast directly, no need for /click
     syncActionBarMacro(body)
 end
 
@@ -209,7 +216,7 @@ end
 local function createOrUpdateMacro(silent)
     if InCombatLockdown() then
         if not silent then
-            print("|cffff0000MDHelper:|r impossible de créer la macro en combat.")
+            print("|cffff0000MDHelper:|r cannot create macro during combat.")
         end
         return false
     end
@@ -218,7 +225,7 @@ local function createOrUpdateMacro(silent)
     if idx and idx > 0 then
         EditMacro(idx, MACRO_NAME, MACRO_ICON, body)
         if not silent then
-            print("|cff00ff00MDHelper:|r macro \"" .. MACRO_NAME .. "\" mise à jour.")
+            print("|cff00ff00MDHelper:|r macro \"" .. MACRO_NAME .. "\" updated.")
         end
         return true
     end
@@ -229,12 +236,12 @@ local function createOrUpdateMacro(silent)
     end
     if newIdx then
         if not silent then
-            print("|cff00ff00MDHelper:|r macro \"" .. MACRO_NAME .. "\" créée. Glisse-la sur ta barre d'action.")
+            print("|cff00ff00MDHelper:|r macro \"" .. MACRO_NAME .. "\" created. Drag it onto your action bar.")
         end
         return true
     else
         if not silent then
-            print("|cffff0000MDHelper:|r impossible de créer la macro (slots pleins).")
+            print("|cffff0000MDHelper:|r cannot create macro (slots full).")
         end
         return false
     end
@@ -248,27 +255,28 @@ local function updateSelectedLabel()
     if not selectedLabel then return end
     local sel = MDHelperDB.selected
     if sel then
-        selectedLabel:SetText("Cible : |cffffcc00" .. sel .. "|r")
+        selectedLabel:SetText("Target: |cffffcc00" .. sel .. "|r")
     else
-        selectedLabel:SetText("Cible : |cff888888(aucune)|r")
+        selectedLabel:SetText("Target: |cff888888(none)|r")
     end
 end
 
 local function updateFloatingButton()
     if not floatBtn then return end
+    -- Texte (non protégé) : toujours OK
     local sel = MDHelperDB.selected
     if sel then
         local color = classColorStr(getClassForName(sel))
         floatBtn.text:SetText(color .. sel .. "|r")
     else
-        floatBtn.text:SetText("|cff888888(aucune)|r")
+        floatBtn.text:SetText("|cff888888(none)|r")
     end
+    -- Visibilité (protégée car secure button) : hors combat seulement
+    if InCombatLockdown() then return end
     if MDHelperDB.hideFloat then
         floatBtn:Hide()
-    elseif IsInGroup() then
-        floatBtn:Show()
     else
-        floatBtn:Hide()
+        floatBtn:Show()
     end
 end
 
@@ -314,6 +322,7 @@ local function createRowButton(i)
                 MDHelperDB.favorites[self.memberName] = true
             end
             refreshList()
+            refreshFavoriteSlots()
         else
             MDHelperDB.selected = self.memberName
             updateMacroText()
@@ -350,7 +359,7 @@ refreshList = function()
                 local color = classColorStr(member.class)
                 local label = color .. member.name .. "|r"
                 if member.isTank then label = label .. " |cff4488ffT|r" end
-                if not member.online then label = label .. " |cff888888(hors-ligne)|r" end
+                if not member.online then label = label .. " |cff888888(offline)|r" end
                 btn.text:SetText(label)
 
                 if member.name == MDHelperDB.selected then
@@ -420,7 +429,7 @@ local function createUI()
     local clearBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     clearBtn:SetSize(90, 22)
     clearBtn:SetPoint("BOTTOMLEFT", 10, 52)
-    clearBtn:SetText("Effacer")
+    clearBtn:SetText("Clear")
     clearBtn:SetScript("OnClick", function()
         MDHelperDB.selected = nil
         updateMacroText()
@@ -432,18 +441,18 @@ local function createUI()
     local refreshBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     refreshBtn:SetSize(90, 22)
     refreshBtn:SetPoint("BOTTOMRIGHT", -10, 52)
-    refreshBtn:SetText("Rafraîchir")
+    refreshBtn:SetText("Refresh")
     refreshBtn:SetScript("OnClick", refreshList)
 
     local macroBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     macroBtn:SetSize(190, 22)
     macroBtn:SetPoint("BOTTOM", 0, 28)
-    macroBtn:SetText("Créer/Mettre à jour la macro")
+    macroBtn:SetText("Create/Update macro")
     macroBtn:SetScript("OnClick", function() createOrUpdateMacro(false) end)
 
     local help = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     help:SetPoint("BOTTOM", 0, 10)
-    help:SetText("Clic = sélectionner | Clic droit = épingler\nEn combat : survole un cadre de raid + bind")
+    help:SetText("Click = select | Right-click = pin\nIn combat: click a pinned slot or hover a raid frame + bind")
     help:SetJustifyH("CENTER")
 
     frame:SetScript("OnShow", function()
@@ -456,7 +465,9 @@ local function createUI()
 end
 
 local function createFloatingButton()
-    floatBtn = CreateFrame("Button", "MDHelper_FloatBtn", UIParent, "BackdropTemplate")
+    -- SecureActionButton + Backdrop : clic gauche caste directement.
+    -- À UIParent : pas de taint sur le frame liste.
+    floatBtn = CreateFrame("Button", "MDHelper_FloatBtn", UIParent, "SecureActionButtonTemplate, BackdropTemplate")
     floatBtn:SetSize(150, 28)
     floatBtn:SetFrameStrata("MEDIUM")
     floatBtn:SetBackdrop({
@@ -467,9 +478,14 @@ local function createFloatingButton()
     })
     floatBtn:SetMovable(true)
     floatBtn:EnableMouse(true)
-    floatBtn:RegisterForDrag("LeftButton")
-    floatBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    -- Drag sur MiddleButton (drag sur LeftButton avale le secure click en TBC 2.5.5)
+    floatBtn:RegisterForDrag("MiddleButton")
+    -- AnyUp + AnyDown nécessaire pour que le secure cast déclenche en TBC 2.5.5
+    floatBtn:RegisterForClicks("AnyUp", "AnyDown")
     floatBtn:SetClampedToScreen(true)
+    -- type1/macrotext1 : cast uniquement sur clic gauche. Clic droit n'a aucun
+    -- type → pas de cast, PreClick s'en occupe (ouvre la liste).
+    floatBtn:SetAttribute("type1", "macro")
 
     floatBtn.icon = floatBtn:CreateTexture(nil, "ARTWORK")
     floatBtn.icon:SetSize(22, 22)
@@ -492,17 +508,12 @@ local function createFloatingButton()
         MDHelperDB.floatY = y
     end)
 
-    floatBtn:SetScript("OnClick", function(self, button)
+    -- NE PAS SetScript("OnClick", ...) : le template SecureActionButtonTemplate
+    -- utilise OnClick pour le cast secure. PreClick = hook non-sécurisé (fire
+    -- AVANT le cast secure). down filter pour éviter le double-toggle.
+    floatBtn:SetScript("PreClick", function(self, button, down)
+        if down then return end
         if button == "RightButton" then
-            if MDHelperDB.selected then
-                MDHelperDB.selected = nil
-                updateMacroText()
-                updateSelectedLabel()
-                updateFloatingButton()
-                if frame:IsShown() then refreshList() end
-                print("|cff00ff00MDHelper:|r cible effacée.")
-            end
-        else
             if frame:IsShown() then frame:Hide() else frame:Show() end
         end
     end)
@@ -510,9 +521,9 @@ local function createFloatingButton()
     floatBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("MDHelper")
-        GameTooltip:AddLine("Clic gauche : ouvrir la liste", 1, 1, 1)
-        GameTooltip:AddLine("Clic droit : effacer la cible", 1, 1, 1)
-        GameTooltip:AddLine("Glisser : déplacer", 1, 1, 1)
+        GameTooltip:AddLine("Left-click: cast Misdirection", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: open/close the list", 1, 1, 1)
+        GameTooltip:AddLine("Middle-click + drag: move", 1, 1, 1)
         GameTooltip:Show()
     end)
     floatBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -521,6 +532,102 @@ local function createFloatingButton()
     floatBtn:ClearAllPoints()
     floatBtn:SetPoint(pt, UIParent, pt, MDHelperDB.floatX or 0, MDHelperDB.floatY or 200)
     floatBtn:Hide()
+end
+
+----------------------------------------------------------------------
+-- Favorite slot buttons (un par favori + tanks auto)
+----------------------------------------------------------------------
+
+local function createFavoriteSlot(i)
+    local slot = CreateFrame("Button", "MDHelper_FavSlot" .. i, UIParent, "SecureActionButtonTemplate, BackdropTemplate")
+    slot:SetSize(150, 24)
+    if i == 1 then
+        slot:SetPoint("TOP", floatBtn, "BOTTOM", 0, -2)
+    else
+        slot:SetPoint("TOP", favSlots[i - 1], "BOTTOM", 0, -1)
+    end
+    slot:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = {left = 3, right = 3, top = 3, bottom = 3},
+    })
+    slot:RegisterForClicks("AnyUp", "AnyDown")
+    slot:SetAttribute("type1", "macro") -- macrotext1 set in refresh
+    slot:EnableMouse(true)
+    slot:Hide()
+
+    slot.text = slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    slot.text:SetPoint("LEFT", 10, 0)
+    slot.text:SetPoint("RIGHT", -10, 0)
+    slot.text:SetJustifyH("LEFT")
+
+    slot:SetScript("PreClick", function(self, button, down)
+        if down then return end
+        if button == "RightButton" then
+            if frame:IsShown() then frame:Hide() else frame:Show() end
+        end
+    end)
+
+    slot:SetScript("OnEnter", function(self)
+        if not self.memberName then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(self.memberName)
+        GameTooltip:AddLine("Left-click: cast Misdirection", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: open/close the list", 1, 1, 1)
+        GameTooltip:AddLine("(Right-click in the list to unpin)", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    return slot
+end
+
+local function preCreateFavSlots()
+    if InCombatLockdown() then return end
+    for i = 1, MAX_FAV_SLOTS do
+        if not favSlots[i] then
+            favSlots[i] = createFavoriteSlot(i)
+        end
+    end
+end
+
+refreshFavoriteSlots = function()
+    if InCombatLockdown() then return end
+    preCreateFavSlots()
+
+    -- Favoris effectifs : tanks (auto) + favoris manuels, ordre du roster
+    local roster = getRoster()
+    local effective = {}
+    for _, m in ipairs(roster) do
+        if m.pinned and #effective < MAX_FAV_SLOTS then
+            effective[#effective + 1] = m
+        end
+    end
+
+    local spell = getSpellName()
+    for i = 1, MAX_FAV_SLOTS do
+        local slot = favSlots[i]
+        local m = effective[i]
+        if m then
+            slot.memberName = m.name
+            local color = classColorStr(m.class)
+            local label = color .. m.name .. "|r"
+            if m.isTank then label = label .. " |cff4488ffT|r" end
+            slot.text:SetText(label)
+            local macroText
+            if m.unit then
+                macroText = "/cast [@" .. m.unit .. ",help,nodead][@" .. m.name .. ",help,nodead] " .. spell
+            else
+                macroText = "/cast [@" .. m.name .. ",help,nodead] " .. spell
+            end
+            slot:SetAttribute("macrotext1", macroText)
+            slot:Show()
+        else
+            slot.memberName = nil
+            slot:Hide()
+        end
+    end
 end
 
 ----------------------------------------------------------------------
@@ -537,32 +644,36 @@ SlashCmdList["MDHELPER"] = function(msg)
         updateSelectedLabel()
         updateFloatingButton()
         if frame and frame:IsShown() then refreshList() end
-        print("|cff00ff00MDHelper:|r cible effacée.")
+        print("|cff00ff00MDHelper:|r target cleared.")
     elseif msg == "macro" then
         createOrUpdateMacro(false)
     elseif msg == "float" then
         MDHelperDB.hideFloat = not MDHelperDB.hideFloat
         updateFloatingButton()
-        print("|cff00ff00MDHelper:|r bouton flottant " .. (MDHelperDB.hideFloat and "masqué" or "affiché en groupe/raid") .. ".")
+        print("|cff00ff00MDHelper:|r floating button " .. (MDHelperDB.hideFloat and "hidden" or "shown") .. ".")
     elseif msg == "debug" then
         print("|cff00ff00MDHelper debug:|r")
-        print("  Sort : " .. getSpellName())
-        print("  Cible sélectionnée : " .. tostring(MDHelperDB.selected))
-        print("  Unit ID résolu : " .. tostring(findUnitForName(MDHelperDB.selected)))
-        print("  InRaid : " .. tostring(IsInRaid()) .. " | InGroup : " .. tostring(IsInGroup()))
-        print("  Macro : " .. (castButton and castButton:GetAttribute("macrotext") or "(absent)"))
-        print("  Macro système existante : " .. tostring(GetMacroIndexByName(MACRO_NAME)))
+        print("  Locale: " .. GetLocale())
+        print("  Spell: " .. getSpellName())
+        print("  Selected: " .. tostring(MDHelperDB.selected))
+        print("  Current target: " .. (UnitExists("target") and UnitName("target") or "(none)"))
+        print("  Resolved unit: " .. tostring(findUnitForName(MDHelperDB.selected)))
+        print("  InRaid: " .. tostring(IsInRaid()) .. " | InGroup: " .. tostring(IsInGroup()))
+        print("  castButton shown=" .. tostring(castButton and castButton:IsShown()) .. " type=" .. tostring(castButton and castButton:GetAttribute("type")) .. " macrotext=" .. tostring(castButton and castButton:GetAttribute("macrotext")))
+        print("  floatBtn shown=" .. tostring(floatBtn and floatBtn:IsShown()) .. " type1=" .. tostring(floatBtn and floatBtn:GetAttribute("type1")) .. " macrotext1=" .. tostring(floatBtn and floatBtn:GetAttribute("macrotext1")))
+        local idx = GetMacroIndexByName(MACRO_NAME)
+        print("  System macro: " .. tostring(idx) .. (idx and idx > 0 and " (OK)" or " (MISSING)"))
     elseif msg == "show" then
         if frame then frame:Show() end
     elseif msg == "hide" then
         if frame then frame:Hide() end
     elseif msg == "help" or msg == "?" then
-        print("|cff00ff00MDHelper:|r commandes :")
-        print("  /md          : ouvrir/fermer la liste")
-        print("  /md clear    : effacer la cible")
-        print("  /md macro    : (re)créer la macro")
-        print("  /md float    : afficher/masquer le bouton flottant")
-        print("  /md debug    : diagnostic")
+        print("|cff00ff00MDHelper:|r commands:")
+        print("  /md          : open/close the list")
+        print("  /md clear    : clear the selected target")
+        print("  /md macro    : (re)create the macro")
+        print("  /md float    : show/hide the floating button")
+        print("  /md debug    : diagnostic info")
     else
         if frame:IsShown() then frame:Hide() else frame:Show() end
     end
@@ -579,30 +690,35 @@ f:SetScript("OnEvent", function(self, event, arg1)
         createCastButton()
         createUI()
         createFloatingButton()
+        updateMacroText() -- pose le macrotext1 sur floatBtn créé après castButton
         updateFloatingButton()
+        refreshFavoriteSlots()
         self:UnregisterEvent("ADDON_LOADED")
         self:RegisterEvent("GROUP_ROSTER_UPDATE")
         self:RegisterEvent("PLAYER_REGEN_ENABLED")
         self:RegisterEvent("PLAYER_ENTERING_WORLD")
-        print("|cff00ff00MDHelper|r chargé. Tape |cffffcc00/md|r pour ouvrir.")
+        print("|cff00ff00MDHelper|r loaded. Type |cffffcc00/md|r to open.")
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         updateMacroText()
         updateFloatingButton()
-        refreshList()  -- sync les attributs des rows même si la liste est fermée
+        refreshList()
+        refreshFavoriteSlots()
 
     elseif event == "PLAYER_REGEN_ENABLED" then
         if pendingMacroUpdate then
             pendingMacroUpdate = false
             updateMacroText()
         end
-        refreshList()  -- rejoue les SetAttribute différés (rows secure)
+        refreshList()
+        refreshFavoriteSlots()
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         preCreateRows()  -- pré-crée les 40 secure rows tôt et hors combat
         refreshList()    -- pour que les attributs soient prêts dès le premier combat
         updateMacroText()
         updateFloatingButton()
+        refreshFavoriteSlots()
         -- Création auto de la macro tant qu'elle n'existe pas (GetMacroIndexByName retourne 0 si absente)
         if not MDHelperDB.macroAutoCreated then
             C_Timer.After(2, function()
@@ -611,7 +727,7 @@ f:SetScript("OnEvent", function(self, event, arg1)
                 if not idx or idx == 0 then
                     if createOrUpdateMacro(true) then
                         MDHelperDB.macroAutoCreated = true
-                        print("|cff00ff00MDHelper:|r macro \"" .. MACRO_NAME .. "\" créée. Glisse-la sur ta barre d'action.")
+                        print("|cff00ff00MDHelper:|r macro \"" .. MACRO_NAME .. "\" created. Drag it onto your action bar.")
                     end
                 else
                     MDHelperDB.macroAutoCreated = true

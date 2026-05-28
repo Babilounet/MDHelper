@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.8.0
+
+- **Clickable floating button**: the floating button is now a `SecureActionButton`. Left-click casts Misdirection on the resolved target (mouseover → selected). Right-click opens/closes the list. Middle-button drag to move (left-button drag would eat the secure click in TBC 2.5.5)
+- **Favorite slot buttons**: one secure cast button per pinned member (tanks auto-pinned by their TANK role / MAINTANK assignment + manual favorites from the list). They sit just below the floating button, anchored to it, and each clicks-to-cast on the assigned person. Works in combat since each button has its own fixed `macrotext1`. Up to 10 slots
+- **Localized UI to English**: all user-facing strings (tooltips, slash command output, list buttons, help text, Bindings.xml description) are now in English, matching the addon's CurseForge audience
+- Stricter macro fallbacks: every `/cast` clause now has `[help,nodead]`, so the cast no longer attempts on dead or hostile targets — important for MD's long cooldown
+- Removed the redundant `[@unit]` / `[@name]` unconditional fallbacks that could fire on invalid targets
+
 ## v1.7.0
 
 - **Fix**: the list window failed to open during combat after v1.6.0. Root cause: list rows were `SecureActionButton`s as children of the window, and Blizzard's combat lockdown blocks `frame:Show()` of any frame whose descendants include secure frames whose visibility would change as a side effect. Reverted rows to plain `Button` (selection + favorite only)

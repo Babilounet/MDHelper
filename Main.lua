@@ -158,15 +158,16 @@ end
 local function buildMacroText()
     local spell = getSpellName()
     local target = MDHelperDB.selected
+    -- @mouseover en 1er : permet de switcher de cible en combat en survolant
+    -- un cadre de raid (Blizzard, Grid, ElvUI, etc.).
     if not target then
-        return "/cast [help,nodead][@target] " .. spell
+        return "/cast [@mouseover,help,nodead][help,nodead][@target] " .. spell
     end
     local unit = findUnitForName(target)
-    -- Unit ID en priorité (fiable cross-realm), fallback par nom
     if unit then
-        return "/cast [@" .. unit .. ",help,nodead][@" .. unit .. "][@" .. target .. "] " .. spell
+        return "/cast [@mouseover,help,nodead][@" .. unit .. ",help,nodead][@" .. unit .. "][@" .. target .. "] " .. spell
     end
-    return "/cast [@" .. target .. ",help,nodead][@" .. target .. "] " .. spell
+    return "/cast [@mouseover,help,nodead][@" .. target .. ",help,nodead][@" .. target .. "] " .. spell
 end
 
 local function syncActionBarMacro(body)
@@ -274,13 +275,10 @@ end
 local MAX_ROWS = 40
 local refreshList -- forward decl
 
-local function buildRowMacroText(member)
-    local spell = getSpellName()
-    return "/cast [@" .. member.unit .. ",help,nodead][@" .. member.unit .. "][@" .. member.name .. ",help,nodead][@" .. member.name .. "] " .. spell
-end
-
 local function createRowButton(i)
-    local btn = CreateFrame("Button", "MDHelperRow" .. i, scrollChild, "SecureActionButtonTemplate")
+    -- Bouton non-sécurisé : juste pour sélectionner / épingler. Le cast en
+    -- combat passe par le keybind global avec @mouseover (voir buildMacroText).
+    local btn = CreateFrame("Button", nil, scrollChild)
     btn:SetSize(180, 20)
     btn:SetPoint("TOPLEFT", 0, -(i - 1) * 20)
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -307,9 +305,6 @@ local function createRowButton(i)
     btn.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
     btn.check:Hide()
 
-    -- Clic gauche = cast secure direct sur ce membre (fonctionne EN COMBAT)
-    btn:SetAttribute("type1", "macro")
-
     btn:SetScript("OnClick", function(self, button)
         if button == "RightButton" then
             MDHelperDB.favorites = MDHelperDB.favorites or {}
@@ -320,8 +315,6 @@ local function createRowButton(i)
             end
             refreshList()
         else
-            -- Le cast a été géré par le secure handler (type1=macro)
-            -- On met aussi à jour la sélection (pour le keybind global)
             MDHelperDB.selected = self.memberName
             updateMacroText()
             updateSelectedLabel()
@@ -334,7 +327,6 @@ local function createRowButton(i)
 end
 
 local function preCreateRows()
-    if InCombatLockdown() then return end
     for i = 1, MAX_ROWS do
         if not rowButtons[i] then
             rowButtons[i] = createRowButton(i)
@@ -346,7 +338,6 @@ refreshList = function()
     if not frame then return end
     preCreateRows()
     local roster = getRoster()
-    local inCombat = InCombatLockdown()
 
     for i = 1, MAX_ROWS do
         local btn = rowButtons[i]
@@ -355,7 +346,6 @@ refreshList = function()
             if member then
                 btn.memberName = member.name
 
-                -- Mise à jour non-sécurisée (toujours OK, même en combat)
                 if member.pinned then btn.pin:Show() else btn.pin:Hide() end
                 local color = classColorStr(member.class)
                 local label = color .. member.name .. "|r"
@@ -371,21 +361,14 @@ refreshList = function()
                     btn.bg:SetColorTexture(0, 0, 0, 0)
                 end
 
-                -- Attribut sécurisé + visibilité : hors combat seulement
-                if not inCombat then
-                    btn:SetAttribute("macrotext1", buildRowMacroText(member))
-                    btn:Show()
-                end
+                btn:Show()
             else
                 btn.memberName = nil
                 btn.text:SetText("")
                 btn.pin:Hide()
                 btn.check:Hide()
                 btn.bg:SetColorTexture(0, 0, 0, 0)
-                if not inCombat then
-                    btn:SetAttribute("macrotext1", "")
-                    btn:Hide()
-                end
+                btn:Hide()
             end
         end
     end
@@ -460,7 +443,7 @@ local function createUI()
 
     local help = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     help:SetPoint("BOTTOM", 0, 10)
-    help:SetText("Clic gauche : cast direct (OK en combat)\nClic droit : épingler en haut")
+    help:SetText("Clic = sélectionner | Clic droit = épingler\nEn combat : survole un cadre de raid + bind")
     help:SetJustifyH("CENTER")
 
     frame:SetScript("OnShow", function()
@@ -616,6 +599,8 @@ f:SetScript("OnEvent", function(self, event, arg1)
         refreshList()  -- rejoue les SetAttribute différés (rows secure)
 
     elseif event == "PLAYER_ENTERING_WORLD" then
+        preCreateRows()  -- pré-crée les 40 secure rows tôt et hors combat
+        refreshList()    -- pour que les attributs soient prêts dès le premier combat
         updateMacroText()
         updateFloatingButton()
         -- Création auto de la macro tant qu'elle n'existe pas (GetMacroIndexByName retourne 0 si absente)

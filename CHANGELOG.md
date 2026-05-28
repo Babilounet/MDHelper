@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.0
+
+- **Fix**: the list window failed to open during combat after v1.6.0. Root cause: list rows were `SecureActionButton`s as children of the window, and Blizzard's combat lockdown blocks `frame:Show()` of any frame whose descendants include secure frames whose visibility would change as a side effect. Reverted rows to plain `Button` (selection + favorite only)
+- **In-combat target switching via mouseover**: the macro now starts with `[@mouseover,help,nodead]`. Hover any raid frame (Blizzard, Grid, ElvUI, etc.) and press the bound key to cast Misdirection on the hovered unit — works in combat, falls back to the selected target if nothing is hovered. This is the standard WoW pattern and doesn't trigger any taint
+- The list is now used to set the **default** target (out of combat). For mid-fight swaps, use mouseover on your raid frames
+
 ## v1.6.0
 
 - **In-combat target switch**: each row in the list is now its own `SecureActionButton`. Left-clicking a name casts Misdirection on that person **directly, even in combat**. Right-click still toggles the favorite. This works around Blizzard's restriction that prevents updating the global cast button's target during combat — instead, every row is pre-configured out of combat as its own dedicated cast button
